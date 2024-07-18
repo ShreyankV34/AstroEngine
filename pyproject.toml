@@ -1,0 +1,94 @@
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "astrocamsync"
+version = "0.1.0"
+description = "Real-time, GPS-synced astrophotography decision engine"
+authors = [
+    {name = "Shreyank V", email = "shreyank@example.com"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.9"
+keywords = [
+    "astrophotography",
+    "astronomy",
+    "camera-settings",
+    "gps-sync",
+    "celestial-mechanics",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+
+dependencies = [
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "pytz>=2023.3",
+    "python-dateutil>=2.8.2",
+    "click>=8.1.0",
+    "pyyaml>=6.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.7.0",
+    "ruff>=0.0.287",
+    "mypy>=1.5.0",
+    "pre-commit>=3.3.3",
+]
+sensors = [
+    "pyserial>=3.5",
+    "bleak>=0.21.0",  # Bluetooth support
+]
+
+[project.scripts]
+astrocam = "astrocam_sync.cli.main:cli"
+
+[project.urls]
+Homepage = "https://github.com/ShreyankV34/AstroEngine"
+Documentation = "https://github.com/ShreyankV34/AstroEngine/blob/main/docs"
+Repository = "https://github.com/ShreyankV34/AstroEngine"
+Issues = "https://github.com/ShreyankV34/AstroEngine/issues"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["astrocam_sync*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py39", "py310", "py311"]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "I", "N"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --cov=astrocam_sync --cov-report=term-missing"

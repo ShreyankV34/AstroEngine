@@ -1,0 +1,312 @@
+"""
+Bortle scale and light pollution models.
+
+Converts between Bortle scale, sky brightness (mag/arcsec²), and
+visual limiting magnitude.
+"""
+from typing import Dict, Tuple
+from dataclasses import dataclass
+
+
+@dataclass
+class BortleClass:
+    """Bortle Dark-Sky Scale classification."""
+    level: int
+    name: str
+    sky_brightness: float  # mag/arcsec² (typical)
+    naked_eye_limit: float  # Limiting magnitude
+    milky_way_visibility: str
+    description: str
+
+
+# Bortle Scale Database
+BORTLE_SCALE: Dict[int, BortleClass] = {
+    1: BortleClass(
+        level=1,
+        name="Excellent dark-sky site",
+        sky_brightness=22.0,
+        naked_eye_limit=7.6,
+        milky_way_visibility="Extremely detailed, structure visible to horizon",
+        description="Zodiacal light, gegenschein visible. Milky Way shows great detail."
+    ),
+    
+    2: BortleClass(
+        level=2,
+        name="Typical truly dark site",
+        sky_brightness=21.7,
+        naked_eye_limit=7.1,
+        milky_way_visibility="Highly structured, clouds visible",
+        description="Zodiacal light striking. Milky Way still casts shadows."
+    ),
+    
+    3: BortleClass(
+        level=3,
+        name="Rural sky",
+        sky_brightness=21.3,
+        naked_eye_limit=6.6,
+        milky_way_visibility="Well visible, some structure",
+        description="Zodiacal light obvious. Milky Way shows much detail."
+    ),
+    
+    4: BortleClass(
+        level=4,
+        name="Rural/suburban transition",
+        sky_brightness=20.4,
+        naked_eye_limit=6.1,
+        milky_way_visibility="Visible above horizon, limited structure",
+        description="Zodiacal light visible. Milky Way shows some detail."
+    ),
+    
+    5: BortleClass(
+        level=5,
+        name="Suburban sky",
+        sky_brightness=19.1,
+        naked_eye_limit=5.6,
+        milky_way_visibility="Barely visible near zenith",
+        description="Zodiacal light very weak. Milky Way washed out."
+    ),
+    
+    6: BortleClass(
+        level=6,
+        name="Bright suburban sky",
+        sky_brightness=18.0,
+        naked_eye_limit=5.1,
+        milky_way_visibility="Invisible",
+        description="No zodiacal light. Milky Way only at zenith."
+    ),
+    
+    7: BortleClass(
+        level=7,
+        name="Suburban/urban transition",
+        sky_brightness=18.0,
+        naked_eye_limit=4.6,
+        milky_way_visibility="Invisible",
+        description="Sky glow covers much of sky. Milky Way invisible."
+    ),
+    
+    8: BortleClass(
+        level=8,
+        name="City sky",
+        sky_brightness=17.0,
+        naked_eye_limit=4.1,
+        milky_way_visibility="Invisible",
+        description="Sky glow everywhere. Only brightest Messier objects visible."
+    ),
+    
+    9: BortleClass(
+        level=9,
+        name="Inner-city sky",
+        sky_brightness=16.0,
+        naked_eye_limit=4.0,
+        milky_way_visibility="Invisible",
+        description="Entire sky glows. Few stars visible at all."
+    ),
+}
+
+
+def bortle_to_sky_brightness(bortle: int) -> float:
+    """
+    Convert Bortle scale to sky brightness.
+    
+    Args:
+        bortle: Bortle scale level (1-9)
+        
+    Returns:
+        Sky brightness in mag/arcsec²
+    """
+    if bortle in BORTLE_SCALE:
+        return BORTLE_SCALE[bortle].sky_brightness
+    
+    # Clamp to valid range
+    bortle = max(1, min(9, bortle))
+    return BORTLE_SCALE[bortle].sky_brightness
+
+
+def sky_brightness_to_bortle(sky_brightness: float) -> int:
+    """
+    Estimate Bortle scale from sky brightness measurement.
+    
+    Args:
+        sky_brightness: Sky brightness in mag/arcsec²
+        
+    Returns:
+        Estimated Bortle scale level (1-9)
+    """
+    # Find closest Bortle class
+    min_diff = float('inf')
+    closest_bortle = 5
+    
+    for level, bortle_class in BORTLE_SCALE.items():
+        diff = abs(bortle_class.sky_brightness - sky_brightness)
+        if diff < min_diff:
+            min_diff = diff
+            closest_bortle = level
+    
+    return closest_bortle
+
+
+def get_bortle_description(bortle: int) -> BortleClass:
+    """
+    Get full Bortle scale description.
+    
+    Args:
+        bortle: Bortle scale level (1-9)
+        
+    Returns:
+        BortleClass with all information
+    """
+    bortle = max(1, min(9, bortle))
+    return BORTLE_SCALE[bortle]
+
+
+def assess_sky_quality(sky_brightness: float) -> Dict[str, any]:
+    """
+    Comprehensive sky quality assessment.
+    
+    Args:
+        sky_brightness: Measured sky brightness (mag/arcsec²)
+        
+    Returns:
+        Dict with quality assessment
+    """
+    bortle = sky_brightness_to_bortle(sky_brightness)
+    bortle_info = BORTLE_SCALE[bortle]
+    
+    # Quality rating
+    if bortle <= 2:
+        quality = "Excellent"
+        color = "green"
+    elif bortle <= 4:
+        quality = "Good"
+        color = "lightgreen"
+    elif bortle <= 6:
+        quality = "Fair"
+        color = "yellow"
+    else:
+        quality = "Poor"
+        color = "red"
+    
+    # Astrophotography suitability
+    if bortle <= 3:
+        astro_suitable = "Excellent for all targets"
+    elif bortle <= 5:
+        astro_suitable = "Good for bright targets, filters recommended"
+    elif bortle <= 6:
+        astro_suitable = "Challenging, narrowband filters essential"
+    else:
+        astro_suitable = "Very difficult, planetary/lunar only"
+    
+    return {
+        "bortle": bortle,
+        "bortle_name": bortle_info.name,
+        "sky_brightness": sky_brightness,
+        "quality": quality,
+        "quality_color": color,
+        "naked_eye_limit": bortle_info.naked_eye_limit,
+        "milky_way": bortle_info.milky_way_visibility,
+        "astrophotography": astro_suitable,
+        "description": bortle_info.description
+    }
+
+
+def estimate_light_pollution_impact(
+    bortle: int,
+    target_brightness: float
+) -> Dict[str, any]:
+    """
+    Estimate how light pollution affects a specific target.
+    
+    Args:
+        bortle: Bortle scale level
+        target_brightness: Target surface brightness (mag/arcsec²)
+        
+    Returns:
+        Impact assessment
+    """
+    sky_brightness = bortle_to_sky_brightness(bortle)
+    
+    # Contrast calculation
+    contrast = sky_brightness - target_brightness
+    
+    # Impact assessment
+    if contrast > 5:
+        impact = "Minimal"
+        visibility = "Excellent"
+        dr_loss = 0.5
+    elif contrast > 3:
+        impact = "Low"
+        visibility = "Good"
+        dr_loss = 1.5
+    elif contrast > 1:
+        impact = "Moderate"
+        visibility = "Fair"
+        dr_loss = 3.0
+    elif contrast > 0:
+        impact = "High"
+        visibility = "Poor"
+        dr_loss = 5.0
+    else:
+        impact = "Severe"
+        visibility = "Very Poor"
+        dr_loss = 7.0
+    
+    # Filter recommendations
+    if bortle <= 3:
+        filter_rec = "Optional - natural color preferred"
+    elif bortle <= 5:
+        filter_rec = "Light pollution filter recommended (UHC, L-Pro)"
+    elif bortle <= 7:
+        filter_rec = "Narrowband filters essential (Ha, OIII, SII)"
+    else:
+        filter_rec = "Narrowband only, broadband not viable"
+    
+    return {
+        "impact": impact,
+        "visibility": visibility,
+        "contrast": contrast,
+        "dynamic_range_loss_stops": dr_loss,
+        "filter_recommendation": filter_rec,
+        "bortle": bortle,
+        "sky_brightness": sky_brightness,
+        "target_brightness": target_brightness
+    }
+
+
+# Example usage
+if __name__ == "__main__":
+    print("=== Bortle Scale Reference ===\n")
+    
+    for level in range(1, 10):
+        bortle = BORTLE_SCALE[level]
+        print(f"Bortle {level}: {bortle.name}")
+        print(f"  Sky Brightness: {bortle.sky_brightness} mag/arcsec²")
+        print(f"  Naked Eye Limit: {bortle.naked_eye_limit} mag")
+        print(f"  Milky Way: {bortle.milky_way_visibility}")
+        print()
+    
+    # Example assessment
+    print("\n=== Sky Quality Assessment ===\n")
+    
+    test_brightness = 19.5  # Typical Bortle 4-5
+    assessment = assess_sky_quality(test_brightness)
+    
+    print(f"Sky Brightness: {test_brightness} mag/arcsec²")
+    print(f"Bortle Class: {assessment['bortle']} ({assessment['bortle_name']})")
+    print(f"Quality: {assessment['quality']}")
+    print(f"Naked Eye Limit: {assessment['naked_eye_limit']} mag")
+    print(f"Astrophotography: {assessment['astrophotography']}")
+    
+    # Impact on Milky Way
+    print("\n=== Light Pollution Impact on Milky Way Core ===\n")
+    
+    mw_brightness = 5.0  # mag/arcsec²
+    
+    for bortle_level in [3, 5, 7]:
+        impact = estimate_light_pollution_impact(bortle_level, mw_brightness)
+        print(f"Bortle {bortle_level}:")
+        print(f"  Impact: {impact['impact']}")
+        print(f"  Visibility: {impact['visibility']}")
+        print(f"  Contrast: {impact['contrast']:.1f} mag")
+        print(f"  DR Loss: ~{impact['dynamic_range_loss_stops']:.1f} stops")
+        print(f"  Filter: {impact['filter_recommendation']}")
+        print()
