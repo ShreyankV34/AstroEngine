@@ -255,6 +255,277 @@ def recommend_settings(
     )
 
 
+def calculate_stacking_benefit(
+    single_frame_snr: float,
+    num_frames: int,
+    stacking_efficiency: float = 0.95
+) -> Tuple[float, float]:
+    """
+    Calculate SNR improvement from frame stacking.
+
+    Args:
+        single_frame_snr: SNR of a single exposure
+        num_frames: Number of frames to stack
+        stacking_efficiency: Stacking efficiency (0.9-1.0, default: 0.95)
+
+    Returns:
+        (stacked_snr, improvement_factor)
+
+    Note:
+        Theoretical SNR improves by sqrt(N), but practical efficiency is ~95%
+
+    Example:
+        >>> stacked_snr, improvement = calculate_stacking_benefit(10.0, 100)
+        >>> improvement  # Should be close to 10x
+        9.5
+    """
+    # Theoretical improvement: sqrt(N)
+    theoretical_improvement = math.sqrt(num_frames)
+
+    # Apply stacking efficiency
+    actual_improvement = theoretical_improvement * stacking_efficiency
+
+    # Stacked SNR
+    stacked_snr = single_frame_snr * actual_improvement
+
+    return stacked_snr, actual_improvement
+
+
+def calculate_frames_needed(
+    target_snr: float,
+    single_frame_snr: float,
+    stacking_efficiency: float = 0.95
+) -> int:
+    """
+    Calculate number of frames needed to reach target SNR.
+
+    Args:
+        target_snr: Desired SNR
+        single_frame_snr: SNR of single exposure
+        stacking_efficiency: Stacking efficiency
+
+    Returns:
+        Number of frames required
+
+    Example:
+        >>> frames = calculate_frames_needed(100.0, 10.0)
+        >>> frames  # Should be ~111 frames (100/10)^2 / 0.95
+        111
+    """
+    if single_frame_snr >= target_snr:
+        return 1
+
+    # SNR_stacked = SNR_single * sqrt(N) * efficiency
+    # N = (SNR_stacked / (SNR_single * efficiency))^2
+    frames = math.ceil((target_snr / (single_frame_snr * stacking_efficiency)) ** 2)
+
+    return max(1, frames)
+
+
+def calculate_total_integration_time(
+    exposure_seconds: float,
+    num_frames: int,
+    dithering_overhead_sec: float = 5.0
+) -> Tuple[float, float]:
+    """
+    Calculate total session time including overhead.
+
+    Args:
+        exposure_seconds: Single exposure time
+        num_frames: Number of frames
+        dithering_overhead_sec: Time between frames for dithering (default: 5s)
+
+    Returns:
+        (total_time_hours, integration_time_hours)
+
+    Example:
+        >>> total, integration = calculate_total_integration_time(30.0, 100)
+        >>> total  # 30s * 100 + 5s * 100 = 58.3 minutes
+        0.97
+        >>> integration  # 30s * 100 = 50 minutes
+        0.83
+    """
+    # Pure integration time
+    integration_time_sec = exposure_seconds * num_frames
+
+    # Total time with overhead
+    total_time_sec = integration_time_sec + (dithering_overhead_sec * num_frames)
+
+    return total_time_sec / 3600.0, integration_time_sec / 3600.0
+
+
+def calculate_diffraction_limit(
+    focal_length_mm: float,
+    aperture_fstop: float,
+    wavelength_nm: float = 550.0
+) -> float:
+    """
+    Calculate diffraction-limited resolution (Airy disk diameter).
+
+    Args:
+        focal_length_mm: Focal length
+        aperture_fstop: Aperture f-number
+        wavelength_nm: Wavelength (default: 550nm, green)
+
+    Returns:
+        Airy disk diameter in micrometers at focal plane
+
+    Reference:
+        Rayleigh criterion: θ = 1.22 * λ / D
+
+    Example:
+        >>> airy = calculate_diffraction_limit(200, 5.6)
+        >>> airy  # Approximately 7.5 micrometers
+        7.52
+    """
+    # Aperture diameter in mm
+    aperture_diameter_mm = focal_length_mm / aperture_fstop
+
+    # Convert to meters
+    aperture_diameter_m = aperture_diameter_mm / 1000.0
+    wavelength_m = wavelength_nm * 1e-9
+
+    # Angular resolution in radians (Rayleigh criterion)
+    angular_resolution_rad = 1.22 * wavelength_m / aperture_diameter_m
+
+    # Convert to micrometers at focal plane
+    # size = focal_length * angle
+    airy_disk_um = focal_length_mm * 1000.0 * angular_resolution_rad
+
+    return airy_disk_um
+
+
+def is_pixel_pitch_optimal(
+    pixel_pitch_um: float,
+    focal_length_mm: float,
+    aperture_fstop: float
+) -> Tuple[bool, str]:
+    """
+    Check if pixel pitch is matched to optics (sampling theorem).
+
+    Args:
+        pixel_pitch_um: Pixel pitch in micrometers
+        focal_length_mm: Focal length
+        aperture_fstop: Aperture f-number
+
+    Returns:
+        (is_optimal, recommendation)
+
+    Note:
+        Nyquist sampling: need 2-3 pixels per Airy disk diameter
+
+    Example:
+        >>> optimal, msg = is_pixel_pitch_optimal(5.94, 200, 2.8)
+        >>> optimal
+        True
+        >>> "well-sampled" in msg
+        True
+    """
+    airy_disk_um = calculate_diffraction_limit(focal_length_mm, aperture_fstop)
+
+    # Sampling ratio: how many pixels per Airy disk
+    pixels_per_airy = airy_disk_um / pixel_pitch_um
+
+    if pixels_per_airy < 1.5:
+        return False, f"Undersampled: {pixels_per_airy:.1f} pixels/airy (need 2-3). Consider smaller pixels or longer focal length."
+    elif pixels_per_airy > 5.0:
+        return False, f"Oversampled: {pixels_per_airy:.1f} pixels/airy (ideal 2-3). Wasting resolution; could use larger pixels."
+    else:
+        return True, f"Well-sampled: {pixels_per_airy:.1f} pixels/airy (optimal: 2-3). Excellent match!"
+
+
+def predict_histogram_position(
+    target_brightness_mag: float,
+    sky_brightness_mag: float,
+    exposure_seconds: float,
+    iso: int
+) -> Tuple[float, str]:
+    """
+    Predict histogram position for exposure validation.
+
+    Args:
+        target_brightness_mag: Target surface brightness
+        sky_brightness_mag: Sky background brightness
+        exposure_seconds: Exposure time
+        iso: ISO setting
+
+    Returns:
+        (histogram_position, advice)
+        histogram_position: 0.0 (left/black) to 1.0 (right/white)
+
+    Note:
+        For astrophotography, aim for:
+        - Sky background: 15-30% (avoid clipping)
+        - Stars: 50-80% (good SNR without saturation)
+
+    Example:
+        >>> pos, advice = predict_histogram_position(5.0, 19.5, 25, 1600)
+        >>> 0.1 < pos < 0.4  # Sky should be in left third
+        True
+    """
+    # Convert magnitudes to relative flux
+    sky_flux = mag_to_flux(sky_brightness_mag)
+    target_flux = mag_to_flux(target_brightness_mag)
+
+    # Histogram position (simplified model)
+    # Base position increases with exposure and ISO
+    base_position = (exposure_seconds / 30.0) * (iso / 800.0) * sky_flux
+
+    # Normalize to [0, 1]
+    histogram_pos = min(0.95, base_position * 0.25)
+
+    # Generate advice
+    if histogram_pos < 0.10:
+        advice = "⚠️ Very dark - increase ISO or exposure time"
+    elif histogram_pos < 0.20:
+        advice = "✓ Good - sky background well-placed, plenty of headroom"
+    elif histogram_pos < 0.35:
+        advice = "✓ Optimal - excellent balance"
+    elif histogram_pos < 0.50:
+        advice = "⚠️ Getting bright - watch for highlight clipping"
+    else:
+        advice = "❌ Too bright - reduce ISO or exposure time to avoid clipping"
+
+    return histogram_pos, advice
+
+
+def calculate_contrast_threshold(
+    target_brightness: float,
+    sky_brightness: float,
+    snr: float
+) -> Tuple[bool, float]:
+    """
+    Check if target has sufficient contrast above sky background.
+
+    Args:
+        target_brightness: Target surface brightness (mag/arcsec²)
+        sky_brightness: Sky brightness (mag/arcsec²)
+        snr: Predicted SNR
+
+    Returns:
+        (is_detectable, contrast_ratio)
+
+    Note:
+        For visual detection, need SNR > 5 and contrast > 1 mag
+        For photography, more forgiving due to stacking
+
+    Example:
+        >>> detectable, contrast = calculate_contrast_threshold(5.0, 19.5, 15.0)
+        >>> detectable
+        True
+        >>> contrast > 1.0  # Good contrast
+        True
+    """
+    # Contrast in magnitudes (lower mag = brighter)
+    contrast_mag = sky_brightness - target_brightness
+
+    # Detection threshold
+    # Need both SNR > 3 and some contrast
+    is_detectable = snr > 3.0 and contrast_mag > 0.5
+
+    return is_detectable, contrast_mag
+
+
 # Example usage
 if __name__ == "__main__":
     # Milky Way Core
